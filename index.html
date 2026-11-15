@@ -631,4 +631,518 @@
           cols[5] || ""
         ].filter(c => c !== "");
 
-        const is
+        const isMultipleChoice = choices.length > 0;
+
+        result.push({
+          id: `tcg_${i}`,
+          csvIndex: i,
+          category: cols[0] || "未分類",
+          question: question,
+          choices: choices,
+          isMultipleChoice: isMultipleChoice,
+          answer: answer,
+          explanation: cols[7] || "",
+          source: cols[8] || "未指定"
+        });
+      }
+      return result;
+    }
+
+    function getCachedQuizData() {
+      const cached = localStorage.getItem(STORAGE_KEYS.CACHE);
+      return cached ? JSON.parse(cached) : null;
+    }
+
+    function setCachedQuizData(data) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.CACHE, JSON.stringify(data));
+      } catch (e) {
+        console.warn("キャッシュの保存に失敗しました", e);
+      }
+    }
+
+    // 複数ルートを同時並列で叩き、一番早く成功したCSVを採用する
+    async function fetchSpreadsheetCSV() {
+      const targetUrl = rawSpreadsheetUrl + "&t=" + new Date().getTime();
+      const proxyUrls = [
+        "https://api.allorigins.win/raw?url=" + encodeURIComponent(targetUrl),
+        "https://corsproxy.io/?" + encodeURIComponent(targetUrl),
+        "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl)
+      ];
+
+      const fetchPromises = proxyUrls.map(async (url) => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        try {
+          const response = await fetch(url, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          if (!response.ok) throw new Error("HTTP error: " + response.status);
+          const text = await response.text();
+          if (!text || text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html")) {
+            throw new Error("Invalid HTML response");
+          }
+          return text;
+        } catch (err) {
+          clearTimeout(timeoutId);
+          throw err;
+        }
+      });
+
+      return Promise.any(fetchPromises);
+    }
+
+    async function initQuizData() {
+      const cachedData = getCachedQuizData();
+
+      if (cachedData && cachedData.length > 0) {
+        allQuizData = cachedData;
+        renderAppUI();
+        document.getElementById("sync-status").innerText = "データ同期中...";
+      }
+
+      try {
+        const csvText = await fetchSpreadsheetCSV();
+        const freshData = parseCSV(csvText);
+
+        if (freshData.length > 0) {
+          allQuizData = freshData;
+          setCachedQuizData(freshData);
+
+          if (!cachedData || cachedData.length === 0) {
+            renderAppUI();
+          } else {
+            setupSourceFilters();
+            setupCategoryFilters();
+            onFilterChange();
+          }
+          document.getElementById("sync-status").innerText = "最新データ同期完了";
+          setTimeout(() => { document.getElementById("sync-status").innerText = ""; }, 3000);
+        } else {
+          throw new Error("問題データが0件でした");
+        }
+      } catch (error) {
+        console.error("データ取得エラー:", error);
+        if (!cachedData || cachedData.length === 0) {
+          document.getElementById("loading-status").innerText = "データの読み込みに失敗しました。再読み込みをお試しください。";
+        } else {
+          document.getElementById("sync-status").innerText = "";
+        }
+      }
+    }
+
+    function renderAppUI() {
+      document.getElementById("loading-status").style.display = "none";
+      setupSourceFilters();
+      setupCategoryFilters();
+      document.getElementById("filter-container").style.display = "block";
+      document.getElementById("start-menu").style.display = "flex";
+      onFilterChange();
+    }
+
+    function toggleAccordion(contentId, iconId) {
+      const content = document.getElementById(contentId);
+      const icon = document.getElementById(iconId);
+
+      if (content.classList.contains("open")) {
+        content.classList.remove("open");
+        icon.innerText = "▼";
+      } else {
+        content.classList.add("open");
+        icon.innerText = "▲";
+      }
+    }
+
+    function setupSourceFilters() {
+      const currentSelected = getSelectedValues("source-checkbox-group");
+      const sources = [...new Set(allQuizData.map(q => q.source))].filter(Boolean);
+      const container = document.getElementById("source-checkbox-group");
+      container.innerHTML = "";
+
+      sources.forEach(src => {
+        const label = document.createElement("label");
+        label.className = "filter-label";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = src;
+        checkbox.checked = currentSelected.length === 0 ? true : currentSelected.includes(src);
+        checkbox.onchange = onFilterChange;
+        label.appendChild(checkbox);
+        label.appendChild(document.createTextNode(` ${src}`));
+        container.appendChild(label);
+      });
+    }
+
+    function setupCategoryFilters() {
+      const currentSelected = getSelectedValues("category-checkbox-group");
+      const categories = [...new Set(allQuizData.map(q => q.category))].filter(Boolean);
+      const box = document.getElementById("category-filter-box");
+      const container = document.getElementById("category-checkbox-group");
+
+      if (categories.length <= 1 && categories[0] === "未分類") {
+        box.style.display = "none";
+      } else {
+        box.style.display = "block";
+      }
+
+      container.innerHTML = "";
+      categories.forEach(cat => {
+        const label = document.createElement("label");
+        label.className = "filter-label";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = cat;
+        checkbox.checked = currentSelected.length === 0 ? true : currentSelected.includes(cat);
+        checkbox.onchange = onFilterChange;
+        label.appendChild(checkbox);
+        label.appendChild(document.createTextNode(` ${cat}`));
+        container.appendChild(label);
+      });
+    }
+
+    function toggleAllCheckboxes(groupId) {
+      const checkboxes = document.querySelectorAll(`#${groupId} input[type='checkbox']`);
+      const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+      checkboxes.forEach(cb => cb.checked = !allChecked);
+      onFilterChange();
+    }
+
+    function getStoredLevels() {
+      const data = localStorage.getItem(STORAGE_KEYS.LEVELS);
+      return data ? JSON.parse(data) : {};
+    }
+
+    function setQuestionLevel(id, level) {
+      const levels = getStoredLevels();
+      levels[id] = level;
+      localStorage.setItem(STORAGE_KEYS.LEVELS, JSON.stringify(levels));
+    }
+
+    function getSelectedValues(groupId) {
+      const checkboxes = document.querySelectorAll(`#${groupId} input[type='checkbox']`);
+      return Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+    }
+
+    function getFilteredQuizData() {
+      const selectedSources = getSelectedValues("source-checkbox-group");
+      const selectedCategories = getSelectedValues("category-checkbox-group");
+
+      const levelCheckboxes = getSelectedValues("level-checkbox-group");
+      const includeUnattempted = levelCheckboxes.includes("unattempted");
+      const selectedLevels = levelCheckboxes.filter(v => v !== "unattempted").map(v => parseInt(v, 10));
+
+      const levels = getStoredLevels();
+      const counts = getStoredCounts();
+
+      return allQuizData.filter(q => {
+        const sourceMatch = selectedSources.includes(q.source);
+        const categoryMatch = selectedCategories.length === 0 || selectedCategories.includes(q.category);
+
+        const playCount = counts[q.id] || 0;
+        const currentLevel = levels[q.id] !== undefined ? levels[q.id] : 0;
+
+        let levelMatch = false;
+        if (playCount === 0) {
+          levelMatch = includeUnattempted;
+        } else {
+          levelMatch = selectedLevels.includes(currentLevel);
+        }
+
+        return sourceMatch && categoryMatch && levelMatch;
+      });
+    }
+
+    function onFilterChange() {
+      const filtered = getFilteredQuizData();
+      document.getElementById("target-count-info").innerText = `条件に合う出題対象: ${filtered.length}問`;
+    }
+
+    function showScreen(screenId) {
+      document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+      document.getElementById(screenId).classList.add("active");
+    }
+
+    function showStartScreen() {
+      onFilterChange();
+      showScreen("start-screen");
+    }
+
+    function getStoredCounts() {
+      const data = localStorage.getItem(STORAGE_KEYS.COUNTS);
+      return data ? JSON.parse(data) : {};
+    }
+
+    function incrementQuestionCounts(questions) {
+      const counts = getStoredCounts();
+      questions.forEach(q => {
+        counts[q.id] = (counts[q.id] || 0) + 1;
+      });
+      localStorage.setItem(STORAGE_KEYS.COUNTS, JSON.stringify(counts));
+    }
+
+    function shuffleArray(array) {
+      const arr = [...array];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    function selectQuestionsLeastServed(dataArray, count) {
+      if (count === 'all' || count >= dataArray.length) {
+        return shuffleArray(dataArray);
+      }
+
+      const counts = getStoredCounts();
+      const items = dataArray.map(item => ({
+        data: item,
+        count: counts[item.id] || 0,
+        rand: Math.random()
+      }));
+
+      items.sort((a, b) => {
+        if (a.count !== b.count) {
+          return a.count - b.count;
+        }
+        return a.rand - b.rand;
+      });
+
+      return items.slice(0, count).map(item => item.data);
+    }
+
+    function startQuiz(count) {
+      const filteredData = getFilteredQuizData();
+
+      if (filteredData.length === 0) {
+        alert("選択された条件に合致する問題がありません。フィルター条件を変更してください。");
+        return;
+      }
+
+      let selected = [];
+      if (count === 'all') {
+        selected = shuffleArray(filteredData);
+        currentCourseName = "全問コース";
+      } else {
+        selected = selectQuestionsLeastServed(filteredData, count);
+        currentCourseName = `${count}問コース`;
+      }
+
+      incrementQuestionCounts(selected);
+
+      currentQuizSet = selected;
+      currentQuestionIndex = 0;
+      rememberedCount = 0;
+      currentRoundWrongQuestions = [];
+
+      showScreen("quiz-screen");
+      loadQuestion();
+    }
+
+    function retryCurrentWrongQuestions() {
+      currentCourseName = "解き直し";
+      currentQuizSet = shuffleArray(currentRoundWrongQuestions);
+      currentQuestionIndex = 0;
+      rememberedCount = 0;
+      currentRoundWrongQuestions = [];
+
+      showScreen("quiz-screen");
+      loadQuestion();
+    }
+
+    function loadQuestion() {
+      const currentQuiz = currentQuizSet[currentQuestionIndex];
+
+      document.getElementById("quiz-progress").innerText = `問題 ${currentQuestionIndex + 1} / ${currentQuizSet.length}`;
+
+      const modeBadge = document.getElementById("mode-badge");
+      modeBadge.innerText = currentQuiz.isMultipleChoice ? "選択式" : "一問一答";
+
+      const sourceBadge = document.getElementById("source-badge");
+      if (currentQuiz.source && currentQuiz.source !== "未指定") {
+        sourceBadge.innerText = currentQuiz.source;
+        sourceBadge.style.display = "inline-block";
+      } else {
+        sourceBadge.style.display = "none";
+      }
+
+      const categoryBadge = document.getElementById("category-badge");
+      if (currentQuiz.category && currentQuiz.category !== "未分類") {
+        categoryBadge.innerText = currentQuiz.category;
+        categoryBadge.style.display = "inline-block";
+      } else {
+        categoryBadge.style.display = "none";
+      }
+
+      document.getElementById("question-text").innerText = currentQuiz.question;
+      document.getElementById("answer-text").innerText = currentQuiz.answer;
+      document.getElementById("explanation-text").innerText = currentQuiz.explanation || "解説なし";
+
+      const sourceText = document.getElementById("source-text");
+      if (currentQuiz.source && currentQuiz.source !== "未指定") {
+        sourceText.innerText = `出典: ${currentQuiz.source}`;
+        sourceText.style.display = "block";
+      } else {
+        sourceText.style.display = "none";
+      }
+
+      const choicesContainer = document.getElementById("choices-container");
+      const resultBanner = document.getElementById("result-banner");
+      const showAnswerBtn = document.getElementById("show-answer-btn");
+
+      choicesContainer.innerHTML = "";
+      resultBanner.style.display = "none";
+      resultBanner.className = "result-banner";
+      document.getElementById("answer-container").style.display = "none";
+      document.getElementById("judge-guide").style.display = "none";
+      document.getElementById("judge-btn-container").style.display = "none";
+
+      if (currentQuiz.isMultipleChoice) {
+        showAnswerBtn.style.display = "none";
+        choicesContainer.style.display = "flex";
+
+        const shuffledChoices = shuffleArray(currentQuiz.choices);
+        shuffledChoices.forEach((choiceText, idx) => {
+          const btn = document.createElement("button");
+          btn.className = "choice-btn";
+          btn.innerText = `${idx + 1}. ${choiceText}`;
+          btn.dataset.choice = choiceText;
+          btn.onclick = () => selectChoice(btn, choiceText);
+          choicesContainer.appendChild(btn);
+        });
+      } else {
+        choicesContainer.style.display = "none";
+        showAnswerBtn.style.display = "block";
+      }
+    }
+
+    function selectChoice(selectedBtn, selectedText) {
+      const currentQuiz = currentQuizSet[currentQuestionIndex];
+      const buttons = document.querySelectorAll("#choices-container .choice-btn");
+      const isCorrect = selectedText === currentQuiz.answer;
+
+      buttons.forEach(btn => {
+        btn.disabled = true;
+        if (btn.dataset.choice === currentQuiz.answer) {
+          btn.classList.add("correct");
+        }
+      });
+
+      const resultBanner = document.getElementById("result-banner");
+      if (isCorrect) {
+        resultBanner.innerText = "⭕ 正解！";
+        resultBanner.classList.add("correct");
+      } else {
+        selectedBtn.classList.add("wrong");
+        resultBanner.innerText = "❌ 不正解…";
+        resultBanner.classList.add("wrong");
+      }
+      resultBanner.style.display = "block";
+
+      document.getElementById("answer-container").style.display = "block";
+      document.getElementById("judge-guide").style.display = "block";
+      document.getElementById("judge-btn-container").style.display = "grid";
+    }
+
+    function showAnswer() {
+      document.getElementById("show-answer-btn").style.display = "none";
+      document.getElementById("answer-container").style.display = "block";
+      document.getElementById("judge-guide").style.display = "block";
+      document.getElementById("judge-btn-container").style.display = "grid";
+    }
+
+    function judgeResult(level) {
+      const currentQuiz = currentQuizSet[currentQuestionIndex];
+
+      setQuestionLevel(currentQuiz.id, level);
+
+      if (level >= 2) {
+        rememberedCount++;
+      } else {
+        currentRoundWrongQuestions.push(currentQuiz);
+      }
+
+      currentQuestionIndex++;
+
+      if (currentQuestionIndex < currentQuizSet.length) {
+        loadQuestion();
+      } else {
+        showFinishScreen();
+      }
+    }
+
+    function showFinishScreen() {
+      const total = currentQuizSet.length;
+      const rate = Math.round((rememberedCount / total) * 100);
+
+      document.getElementById("score-text").innerText = `${rememberedCount} / ${total} 問`;
+      document.getElementById("rate-text").innerText = `${rate}%`;
+
+      const retryBtn = document.getElementById("retry-wrong-btn");
+      if (currentRoundWrongQuestions.length > 0) {
+        retryBtn.innerText = `今回「まだ」「あやしい」だった ${currentRoundWrongQuestions.length} 問だけ解き直す`;
+        retryBtn.style.display = "block";
+      } else {
+        retryBtn.style.display = "none";
+      }
+
+      saveHistoryRecord(currentCourseName, rememberedCount, total, rate);
+      showScreen("finish-screen");
+    }
+
+    function saveHistoryRecord(course, correct, total, rate) {
+      const now = new Date();
+      const dateStr = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+      const record = {
+        date: dateStr,
+        course: course,
+        score: `${correct}/${total}`,
+        rate: rate
+      };
+
+      let history = JSON.parse(localStorage.getItem(STORAGE_KEYS.HISTORY) || "[]");
+      history.unshift(record);
+      if (history.length > 20) history.pop();
+
+      localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
+    }
+
+    function showHistoryScreen() {
+      const history = JSON.parse(localStorage.getItem(STORAGE_KEYS.HISTORY) || "[]");
+      const historyList = document.getElementById("history-list");
+      historyList.innerHTML = "";
+
+      if (history.length === 0) {
+        historyList.innerHTML = '<li style="text-align:center; color:#666; padding:20px;">履歴データはありません</li>';
+      } else {
+        history.forEach(item => {
+          const li = document.createElement("li");
+          li.className = "history-item";
+          li.innerHTML = `
+            <div>
+              <span style="color:#666;">${item.date}</span>
+              <span style="margin-left:8px; font-weight:bold;">[${item.course}]</span>
+            </div>
+            <div style="font-weight:bold; color:#333;">${item.score}問 (${item.rate}%)</div>
+          `;
+          historyList.appendChild(li);
+        });
+      }
+
+      showScreen("history-screen");
+    }
+
+    function clearHistory() {
+      if (confirm("過去の履歴・記憶状態・出題記録を初期化しますか？")) {
+        localStorage.removeItem(STORAGE_KEYS.HISTORY);
+        localStorage.removeItem(STORAGE_KEYS.LEVELS);
+        localStorage.removeItem(STORAGE_KEYS.COUNTS);
+        localStorage.removeItem(STORAGE_KEYS.CACHE);
+        showHistoryScreen();
+      }
+    }
+
+    initQuizData();
+  </script>
+</body>
+</html>
