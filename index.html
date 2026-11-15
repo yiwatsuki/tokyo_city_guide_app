@@ -40,7 +40,6 @@
       margin-bottom: 20px;
     }
 
-    /* フィルターボックス＆折りたたみ（アコーディオン）のスタイル */
     .filter-box {
       background: #f8f9fa;
       border: 1px solid #e9ecef;
@@ -225,7 +224,6 @@
       line-height: 1.6;
     }
 
-    /* 選択式ボタンのスタイル */
     .choices-container {
       display: flex;
       flex-direction: column;
@@ -270,7 +268,6 @@
       font-weight: bold;
     }
 
-    /* 選択式の正誤フィードバックバナー */
     .result-banner {
       display: none;
       padding: 12px;
@@ -347,7 +344,6 @@
       text-align: right;
     }
 
-    /* 4段階の判定ボタンコンテナ */
     .judge-guide {
       display: none;
       font-size: 0.85rem;
@@ -445,7 +441,6 @@
       <p style="text-align: center; color: #666; margin-bottom: 24px;" id="loading-status">問題を読み込んでいます...</p>
       
       <div id="filter-container" style="display: none;">
-        <!-- ① 出題ソース選択フィルター -->
         <div class="filter-box">
           <div class="filter-header" onclick="toggleAccordion('source-content', 'source-icon')">
             <span class="filter-title-text">① 出題ソースを選択</span>
@@ -459,7 +454,6 @@
           </div>
         </div>
 
-        <!-- ② カテゴリ選択フィルター -->
         <div class="filter-box" id="category-filter-box" style="display: none;">
           <div class="filter-header" onclick="toggleAccordion('category-content', 'category-icon')">
             <span class="filter-title-text">② カテゴリを選択</span>
@@ -473,7 +467,6 @@
           </div>
         </div>
 
-        <!-- ③ 定着度レベル選択フィルター -->
         <div class="filter-box">
           <div class="filter-header" onclick="toggleAccordion('level-content', 'level-icon')">
             <span class="filter-title-text">③ 定着度レベルを選択</span>
@@ -519,14 +512,11 @@
       </div>
       <div class="question-text" id="question-text"></div>
 
-      <!-- 選択式モード用エリア -->
       <div class="choices-container" id="choices-container" style="display: none;"></div>
       <div class="result-banner" id="result-banner"></div>
 
-      <!-- 一問一答モード用エリア -->
       <button class="show-answer-btn" id="show-answer-btn" onclick="showAnswer()" style="display: none;">答えを見る</button>
 
-      <!-- 正解・解説表示エリア -->
       <div class="answer-container" id="answer-container">
         <div class="answer-title">【正解】</div>
         <div class="answer-text" id="answer-text"></div>
@@ -534,7 +524,6 @@
         <div class="source-text" id="source-text"></div>
       </div>
 
-      <!-- 4段階の判定ボタン -->
       <div class="judge-guide" id="judge-guide">理解度を選んで次の問題へ</div>
       <div class="judge-btn-container" id="judge-btn-container">
         <button class="judge-btn btn-lvl-0" onclick="judgeResult(0)">✕ まだ</button>
@@ -567,9 +556,6 @@
   </div>
 
   <script>
-    // CORS対応・プロキシ不要の高速CSV取得URL
-    const gvizCsvUrl = "https://docs.google.com/spreadsheets/d/1IsMuilaHTNPMXYXZdW383YJCLBIUmWVzvkA8kUn2bPs/gviz/tq?tqx=out:csv&gid=1420393186";
-    // バックアップ用のウェブ公開CSV URL
     const rawSpreadsheetUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrw8y7JKY3rsX4GOdSoi-j2MaCkSh9aM7LS5QeIXJsXbThTtfpGUwaI_DPnR49NPaO8YPBleLKsj0n/pub?gid=1420393186&single=true&output=csv";
 
     const STORAGE_KEYS = {
@@ -631,7 +617,6 @@
       const records = parseCSVRecords(text);
       const result = [];
 
-      // 列構成: 0:category, 1:question, 2:choice_1, 3:choice_2, 4:choice_3, 5:choice_4, 6:answer, 7:explanation, 8:source
       for (let i = 1; i < records.length; i++) {
         const cols = records[i];
         const question = cols[1] || "";
@@ -646,184 +631,4 @@
           cols[5] || ""
         ].filter(c => c !== "");
 
-        const isMultipleChoice = choices.length > 0;
-
-        result.push({
-          id: `tcg_${i}`,
-          csvIndex: i,
-          category: cols[0] || "未分類",
-          question: question,
-          choices: choices,
-          isMultipleChoice: isMultipleChoice,
-          answer: answer,
-          explanation: cols[7] || "",
-          source: cols[8] || "未指定"
-        });
-      }
-      return result;
-    }
-
-    function getCachedQuizData() {
-      const cached = localStorage.getItem(STORAGE_KEYS.CACHE);
-      return cached ? JSON.parse(cached) : null;
-    }
-
-    function setCachedQuizData(data) {
-      try {
-        localStorage.setItem(STORAGE_KEYS.CACHE, JSON.stringify(data));
-      } catch (e) {
-        console.warn("キャッシュの保存に失敗しました", e);
-      }
-    }
-
-    async function fetchSpreadsheetCSV() {
-      const timestamp = "&t=" + new Date().getTime();
-      const urls = [
-        gvizCsvUrl + timestamp,
-        rawSpreadsheetUrl + timestamp
-      ];
-
-      for (const url of urls) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000);
-          const response = await fetch(url, { signal: controller.signal });
-          clearTimeout(timeoutId);
-
-          if (response.ok) {
-            const text = await response.text();
-            if (text && !text.trim().startsWith("<!DOCTYPE")) {
-              return text;
-            }
-          }
-        } catch (e) {
-          console.warn("取得試行失敗:", url, e);
-        }
-      }
-      throw new Error("CSVの取得に失敗しました");
-    }
-
-    async function initQuizData() {
-      const cachedData = getCachedQuizData();
-
-      if (cachedData && cachedData.length > 0) {
-        allQuizData = cachedData;
-        renderAppUI();
-        document.getElementById("sync-status").innerText = "データ同期中...";
-      }
-
-      try {
-        const csvText = await fetchSpreadsheetCSV();
-        const freshData = parseCSV(csvText);
-
-        if (freshData.length > 0) {
-          allQuizData = freshData;
-          setCachedQuizData(freshData);
-
-          if (!cachedData || cachedData.length === 0) {
-            renderAppUI();
-          } else {
-            setupSourceFilters();
-            setupCategoryFilters();
-            onFilterChange();
-          }
-          document.getElementById("sync-status").innerText = "最新データ同期完了";
-          setTimeout(() => { document.getElementById("sync-status").innerText = ""; }, 3000);
-        } else {
-          throw new Error("問題データが0件でした");
-        }
-      } catch (error) {
-        console.error("データ取得エラー:", error);
-        if (!cachedData || cachedData.length === 0) {
-          document.getElementById("loading-status").innerText = "データの読み込みに失敗しました。再読み込みをお試しください。";
-        } else {
-          document.getElementById("sync-status").innerText = "";
-        }
-      }
-    }
-
-    function renderAppUI() {
-      document.getElementById("loading-status").style.display = "none";
-      setupSourceFilters();
-      setupCategoryFilters();
-      document.getElementById("filter-container").style.display = "block";
-      document.getElementById("start-menu").style.display = "flex";
-      onFilterChange();
-    }
-
-    function toggleAccordion(contentId, iconId) {
-      const content = document.getElementById(contentId);
-      const icon = document.getElementById(iconId);
-
-      if (content.classList.contains("open")) {
-        content.classList.remove("open");
-        icon.innerText = "▼";
-      } else {
-        content.classList.add("open");
-        icon.innerText = "▲";
-      }
-    }
-
-    function setupSourceFilters() {
-      const currentSelected = getSelectedValues("source-checkbox-group");
-      const sources = [...new Set(allQuizData.map(q => q.source))].filter(Boolean);
-      const container = document.getElementById("source-checkbox-group");
-      container.innerHTML = "";
-
-      sources.forEach(src => {
-        const label = document.createElement("label");
-        label.className = "filter-label";
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.value = src;
-        checkbox.checked = currentSelected.length === 0 ? true : currentSelected.includes(src);
-        checkbox.onchange = onFilterChange;
-        label.appendChild(checkbox);
-        label.appendChild(document.createTextNode(` ${src}`));
-        container.appendChild(label);
-      });
-    }
-
-    function setupCategoryFilters() {
-      const currentSelected = getSelectedValues("category-checkbox-group");
-      const categories = [...new Set(allQuizData.map(q => q.category))].filter(Boolean);
-      const box = document.getElementById("category-filter-box");
-      const container = document.getElementById("category-checkbox-group");
-
-      if (categories.length <= 1 && categories[0] === "未分類") {
-        box.style.display = "none";
-      } else {
-        box.style.display = "block";
-      }
-
-      container.innerHTML = "";
-      categories.forEach(cat => {
-        const label = document.createElement("label");
-        label.className = "filter-label";
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.value = cat;
-        checkbox.checked = currentSelected.length === 0 ? true : currentSelected.includes(cat);
-        checkbox.onchange = onFilterChange;
-        label.appendChild(checkbox);
-        label.appendChild(document.createTextNode(` ${cat}`));
-        container.appendChild(label);
-      });
-    }
-
-    function toggleAllCheckboxes(groupId) {
-      const checkboxes = document.querySelectorAll(`#${groupId} input[type='checkbox']`);
-      const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-      checkboxes.forEach(cb => cb.checked = !allChecked);
-      onFilterChange();
-    }
-
-    function getStoredLevels() {
-      const data = localStorage.getItem(STORAGE_KEYS.LEVELS);
-      return data ? JSON.parse(data) : {};
-    }
-
-    function setQuestionLevel(id, level) {
-      const levels = getStoredLevels();
-      levels[id] = level;
-      localStorage.setItem(STORAGE_KEYS.LEVELS
+        const is
