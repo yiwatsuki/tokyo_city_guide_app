@@ -556,8 +556,6 @@
   </div>
 
   <script>
-    const rawSpreadsheetUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrw8y7JKY3rsX4GOdSoi-j2MaCkSh9aM7LS5QeIXJsXbThTtfpGUwaI_DPnR49NPaO8YPBleLKsj0n/pub?gid=1420393186&single=true&output=csv";
-
     const STORAGE_KEYS = {
       CACHE: "tokyo_city_guide_cache",
       LEVELS: "tokyo_city_guide_levels",
@@ -661,36 +659,6 @@
       }
     }
 
-    // 複数ルートを同時並列で叩き、一番早く成功したCSVを採用する
-    async function fetchSpreadsheetCSV() {
-      const targetUrl = rawSpreadsheetUrl + "&t=" + new Date().getTime();
-      const proxyUrls = [
-        "https://api.allorigins.win/raw?url=" + encodeURIComponent(targetUrl),
-        "https://corsproxy.io/?" + encodeURIComponent(targetUrl),
-        "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl)
-      ];
-
-      const fetchPromises = proxyUrls.map(async (url) => {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-        try {
-          const response = await fetch(url, { signal: controller.signal });
-          clearTimeout(timeoutId);
-          if (!response.ok) throw new Error("HTTP error: " + response.status);
-          const text = await response.text();
-          if (!text || text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html")) {
-            throw new Error("Invalid HTML response");
-          }
-          return text;
-        } catch (err) {
-          clearTimeout(timeoutId);
-          throw err;
-        }
-      });
-
-      return Promise.any(fetchPromises);
-    }
-
     async function initQuizData() {
       const cachedData = getCachedQuizData();
 
@@ -701,7 +669,12 @@
       }
 
       try {
-        const csvText = await fetchSpreadsheetCSV();
+        // Vercelのサーバーレス関数(/api/csv)から直接取得
+        const response = await fetch("/api/csv?t=" + new Date().getTime());
+        if (!response.ok) {
+          throw new Error("HTTP error: " + response.status);
+        }
+        const csvText = await response.text();
         const freshData = parseCSV(csvText);
 
         if (freshData.length > 0) {
