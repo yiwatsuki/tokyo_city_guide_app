@@ -485,4 +485,345 @@
             </div>
             <div class="checkbox-group" id="level-checkbox-group">
               <label class="filter-label"><input type="checkbox" value="unattempted" checked onchange="onFilterChange()"> ⬜ 未挑戦（一度もやっていない）</label>
-              <label class
+              <label class="filter-label"><input type="checkbox" value="0" checked onchange="onFilterChange()"> ✕ まだ</label>
+              <label class="filter-label"><input type="checkbox" value="1" onchange="onFilterChange()"> △ あやしい</label>
+              <label class="filter-label"><input type="checkbox" value="2" onchange="onFilterChange()"> ◯ 覚えた</label>
+              <label class="filter-label"><input type="checkbox" value="3" onchange="onFilterChange()"> ◎ 完璧</label>
+            </div>
+          </div>
+        </div>
+
+        <div style="text-align: center;">
+          <div class="count-info" id="target-count-info">対象問題数: 0問</div>
+          <div class="sync-status" id="sync-status"></div>
+        </div>
+      </div>
+
+      <div id="start-menu" class="menu-btn-container" style="display: none;">
+        <button class="menu-btn" onclick="startQuiz(10)">10問挑戦コース</button>
+        <button class="menu-btn" onclick="startQuiz(20)">20問挑戦コース</button>
+        <button class="menu-btn" onclick="startQuiz('all')">全問挑戦コース</button>
+        <button class="sub-btn" onclick="showHistoryScreen()">学習ログを見る</button>
+      </div>
+    </div>
+
+    <!-- 2. クイズ画面 -->
+    <div id="quiz-screen" class="screen">
+      <div class="quiz-header">
+        <span id="quiz-progress">問題 1 / 10</span>
+        <div class="badge-container">
+          <span class="mode-badge" id="mode-badge"></span>
+          <span class="source-badge" id="source-badge" style="display: none;"></span>
+          <span class="category-badge" id="category-badge" style="display: none;"></span>
+        </div>
+      </div>
+      <div class="question-text" id="question-text"></div>
+
+      <!-- 選択式モード用エリア -->
+      <div class="choices-container" id="choices-container" style="display: none;"></div>
+      <div class="result-banner" id="result-banner"></div>
+
+      <!-- 一問一答モード用エリア -->
+      <button class="show-answer-btn" id="show-answer-btn" onclick="showAnswer()" style="display: none;">答えを見る</button>
+
+      <!-- 正解・解説表示エリア -->
+      <div class="answer-container" id="answer-container">
+        <div class="answer-title">【正解】</div>
+        <div class="answer-text" id="answer-text"></div>
+        <div class="explanation-text" id="explanation-text"></div>
+        <div class="source-text" id="source-text"></div>
+      </div>
+
+      <!-- 4段階の判定ボタン -->
+      <div class="judge-guide" id="judge-guide">理解度を選んで次の問題へ</div>
+      <div class="judge-btn-container" id="judge-btn-container">
+        <button class="judge-btn btn-lvl-0" onclick="judgeResult(0)">✕ まだ</button>
+        <button class="judge-btn btn-lvl-1" onclick="judgeResult(1)">△ あやしい</button>
+        <button class="judge-btn btn-lvl-2" onclick="judgeResult(2)">◯ 覚えた</button>
+        <button class="judge-btn btn-lvl-3" onclick="judgeResult(3)">◎ 完璧</button>
+      </div>
+    </div>
+
+    <!-- 3. 結果画面 -->
+    <div id="finish-screen" class="screen">
+      <h2>学習完了</h2>
+      <div class="score-box">
+        <div>今回「◯覚えた」または「◎完璧」になった割合</div>
+        <div class="score-number" id="score-text">0 / 0 問</div>
+        <div class="rate-number" id="rate-text">0%</div>
+      </div>
+      
+      <button class="weak-btn" id="retry-wrong-btn" onclick="retryCurrentWrongQuestions()" style="display: none; width: 100%; margin-bottom: 12px;">今回「まだ」「あやしい」だった問題だけ解き直す</button>
+      <button class="next-btn menu-btn" style="width:100%;" onclick="showStartScreen()">最初のメニューに戻る</button>
+    </div>
+
+    <!-- 4. 履歴画面 -->
+    <div id="history-screen" class="screen">
+      <h2>学習履歴</h2>
+      <ul class="history-list" id="history-list"></ul>
+      <button class="sub-btn" onclick="clearHistory()" style="width:100%; margin-bottom:12px; color:#c5221f;">履歴・記憶・出題記録を初期化</button>
+      <button class="menu-btn" style="width:100%;" onclick="showStartScreen()">メニューに戻る</button>
+    </div>
+  </div>
+
+  <script>
+    // CORS対応・プロキシ不要の高速CSV取得URL
+    const gvizCsvUrl = "https://docs.google.com/spreadsheets/d/1IsMuilaHTNPMXYXZdW383YJCLBIUmWVzvkA8kUn2bPs/gviz/tq?tqx=out:csv&gid=1420393186";
+    // バックアップ用のウェブ公開CSV URL
+    const rawSpreadsheetUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrw8y7JKY3rsX4GOdSoi-j2MaCkSh9aM7LS5QeIXJsXbThTtfpGUwaI_DPnR49NPaO8YPBleLKsj0n/pub?gid=1420393186&single=true&output=csv";
+
+    const STORAGE_KEYS = {
+      CACHE: "tokyo_city_guide_cache",
+      LEVELS: "tokyo_city_guide_levels",
+      COUNTS: "tokyo_city_guide_counts",
+      HISTORY: "tokyo_city_guide_history"
+    };
+
+    let allQuizData = [];
+    let currentQuizSet = [];
+    let currentRoundWrongQuestions = [];
+    let currentQuestionIndex = 0;
+    let rememberedCount = 0;
+    let currentCourseName = "";
+
+    function parseCSVRecords(text) {
+      const records = [];
+      let row = [];
+      let cur = '';
+      let inQuotes = false;
+
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        const next = text[i + 1];
+
+        if (c === '"') {
+          if (inQuotes && next === '"') {
+            cur += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (c === ',' && !inQuotes) {
+          row.push(cur.trim());
+          cur = '';
+        } else if ((c === '\r' || c === '\n') && !inQuotes) {
+          if (c === '\r' && next === '\n') i++;
+          row.push(cur.trim());
+          if (row.some(cell => cell !== '')) {
+            records.push(row);
+          }
+          row = [];
+          cur = '';
+        } else {
+          cur += c;
+        }
+      }
+      if (cur !== '' || row.length > 0) {
+        row.push(cur.trim());
+        if (row.some(cell => cell !== '')) {
+          records.push(row);
+        }
+      }
+      return records;
+    }
+
+    function parseCSV(text) {
+      const records = parseCSVRecords(text);
+      const result = [];
+
+      // 列構成: 0:category, 1:question, 2:choice_1, 3:choice_2, 4:choice_3, 5:choice_4, 6:answer, 7:explanation, 8:source
+      for (let i = 1; i < records.length; i++) {
+        const cols = records[i];
+        const question = cols[1] || "";
+        const answer = cols[6] || "";
+
+        if (!question) continue;
+
+        const choices = [
+          cols[2] || "",
+          cols[3] || "",
+          cols[4] || "",
+          cols[5] || ""
+        ].filter(c => c !== "");
+
+        const isMultipleChoice = choices.length > 0;
+
+        result.push({
+          id: `tcg_${i}`,
+          csvIndex: i,
+          category: cols[0] || "未分類",
+          question: question,
+          choices: choices,
+          isMultipleChoice: isMultipleChoice,
+          answer: answer,
+          explanation: cols[7] || "",
+          source: cols[8] || "未指定"
+        });
+      }
+      return result;
+    }
+
+    function getCachedQuizData() {
+      const cached = localStorage.getItem(STORAGE_KEYS.CACHE);
+      return cached ? JSON.parse(cached) : null;
+    }
+
+    function setCachedQuizData(data) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.CACHE, JSON.stringify(data));
+      } catch (e) {
+        console.warn("キャッシュの保存に失敗しました", e);
+      }
+    }
+
+    async function fetchSpreadsheetCSV() {
+      const timestamp = "&t=" + new Date().getTime();
+      const urls = [
+        gvizCsvUrl + timestamp,
+        rawSpreadsheetUrl + timestamp
+      ];
+
+      for (const url of urls) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          const response = await fetch(url, { signal: controller.signal });
+          clearTimeout(timeoutId);
+
+          if (response.ok) {
+            const text = await response.text();
+            if (text && !text.trim().startsWith("<!DOCTYPE")) {
+              return text;
+            }
+          }
+        } catch (e) {
+          console.warn("取得試行失敗:", url, e);
+        }
+      }
+      throw new Error("CSVの取得に失敗しました");
+    }
+
+    async function initQuizData() {
+      const cachedData = getCachedQuizData();
+
+      if (cachedData && cachedData.length > 0) {
+        allQuizData = cachedData;
+        renderAppUI();
+        document.getElementById("sync-status").innerText = "データ同期中...";
+      }
+
+      try {
+        const csvText = await fetchSpreadsheetCSV();
+        const freshData = parseCSV(csvText);
+
+        if (freshData.length > 0) {
+          allQuizData = freshData;
+          setCachedQuizData(freshData);
+
+          if (!cachedData || cachedData.length === 0) {
+            renderAppUI();
+          } else {
+            setupSourceFilters();
+            setupCategoryFilters();
+            onFilterChange();
+          }
+          document.getElementById("sync-status").innerText = "最新データ同期完了";
+          setTimeout(() => { document.getElementById("sync-status").innerText = ""; }, 3000);
+        } else {
+          throw new Error("問題データが0件でした");
+        }
+      } catch (error) {
+        console.error("データ取得エラー:", error);
+        if (!cachedData || cachedData.length === 0) {
+          document.getElementById("loading-status").innerText = "データの読み込みに失敗しました。再読み込みをお試しください。";
+        } else {
+          document.getElementById("sync-status").innerText = "";
+        }
+      }
+    }
+
+    function renderAppUI() {
+      document.getElementById("loading-status").style.display = "none";
+      setupSourceFilters();
+      setupCategoryFilters();
+      document.getElementById("filter-container").style.display = "block";
+      document.getElementById("start-menu").style.display = "flex";
+      onFilterChange();
+    }
+
+    function toggleAccordion(contentId, iconId) {
+      const content = document.getElementById(contentId);
+      const icon = document.getElementById(iconId);
+
+      if (content.classList.contains("open")) {
+        content.classList.remove("open");
+        icon.innerText = "▼";
+      } else {
+        content.classList.add("open");
+        icon.innerText = "▲";
+      }
+    }
+
+    function setupSourceFilters() {
+      const currentSelected = getSelectedValues("source-checkbox-group");
+      const sources = [...new Set(allQuizData.map(q => q.source))].filter(Boolean);
+      const container = document.getElementById("source-checkbox-group");
+      container.innerHTML = "";
+
+      sources.forEach(src => {
+        const label = document.createElement("label");
+        label.className = "filter-label";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = src;
+        checkbox.checked = currentSelected.length === 0 ? true : currentSelected.includes(src);
+        checkbox.onchange = onFilterChange;
+        label.appendChild(checkbox);
+        label.appendChild(document.createTextNode(` ${src}`));
+        container.appendChild(label);
+      });
+    }
+
+    function setupCategoryFilters() {
+      const currentSelected = getSelectedValues("category-checkbox-group");
+      const categories = [...new Set(allQuizData.map(q => q.category))].filter(Boolean);
+      const box = document.getElementById("category-filter-box");
+      const container = document.getElementById("category-checkbox-group");
+
+      if (categories.length <= 1 && categories[0] === "未分類") {
+        box.style.display = "none";
+      } else {
+        box.style.display = "block";
+      }
+
+      container.innerHTML = "";
+      categories.forEach(cat => {
+        const label = document.createElement("label");
+        label.className = "filter-label";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = cat;
+        checkbox.checked = currentSelected.length === 0 ? true : currentSelected.includes(cat);
+        checkbox.onchange = onFilterChange;
+        label.appendChild(checkbox);
+        label.appendChild(document.createTextNode(` ${cat}`));
+        container.appendChild(label);
+      });
+    }
+
+    function toggleAllCheckboxes(groupId) {
+      const checkboxes = document.querySelectorAll(`#${groupId} input[type='checkbox']`);
+      const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+      checkboxes.forEach(cb => cb.checked = !allChecked);
+      onFilterChange();
+    }
+
+    function getStoredLevels() {
+      const data = localStorage.getItem(STORAGE_KEYS.LEVELS);
+      return data ? JSON.parse(data) : {};
+    }
+
+    function setQuestionLevel(id, level) {
+      const levels = getStoredLevels();
+      levels[id] = level;
+      localStorage.setItem(STORAGE_KEYS.LEVELS
