@@ -402,8 +402,8 @@
     }
 
     .sub-score-text {
-      font-size: 0.95rem;
-      color: #555;
+      font-size: 0.9rem;
+      color: #666;
       margin-bottom: 16px;
     }
 
@@ -467,10 +467,10 @@
 
     .rate-pill {
       display: inline-block;
-      padding: 2px 8px;
+      padding: 3px 10px;
       border-radius: 12px;
       font-weight: bold;
-      font-size: 0.85rem;
+      font-size: 0.9rem;
     }
 
     .rate-high {
@@ -624,10 +624,10 @@
     <div id="finish-screen" class="screen">
       <h2>学習完了</h2>
       <div class="score-box">
-        <div>今回「◯覚えた」または「◎完璧」になった割合</div>
+        <div id="main-score-label">今回の正答率</div>
         <div class="score-number" id="score-text">0 / 0 問</div>
         <div class="rate-number" id="rate-text">0%</div>
-        <div class="sub-score-text" id="choice-score-text" style="display: none;"></div>
+        <div class="sub-score-text" id="sub-score-text" style="display: none;"></div>
       </div>
       
       <button class="weak-btn" id="retry-wrong-btn" onclick="retryCurrentWrongQuestions()" style="display: none; width: 100%; margin-bottom: 12px;">今回「まだ」「あやしい」だった問題だけ解き直す</button>
@@ -1148,21 +1148,38 @@
 
     function showFinishScreen() {
       const total = currentQuizSet.length;
-      const rate = Math.round((rememberedCount / total) * 100);
+      const retentionRate = Math.round((rememberedCount / total) * 100);
 
-      document.getElementById("score-text").innerText = `${rememberedCount} / ${total} 問`;
-      document.getElementById("rate-text").innerText = `${rate}%`;
+      const mainLabelEl = document.getElementById("main-score-label");
+      const scoreTextEl = document.getElementById("score-text");
+      const rateTextEl = document.getElementById("rate-text");
+      const subScoreEl = document.getElementById("sub-score-text");
 
-      const choiceScoreEl = document.getElementById("choice-score-text");
       if (choiceQuestionCount > 0) {
-        const choiceRate = Math.round((choiceCorrectCount / choiceQuestionCount) * 100);
-        choiceScoreEl.innerText = `（選択式の初回正答率: ${choiceCorrectCount} / ${choiceQuestionCount} 問 ・ ${choiceRate}%）`;
-        choiceScoreEl.style.display = "block";
+        // 選択式問題がある場合は「正答率」をメインで大きく表示
+        const accuracyRate = Math.round((choiceCorrectCount / choiceQuestionCount) * 100);
+        mainLabelEl.innerText = "今回の正答率";
+        scoreTextEl.innerText = `${choiceCorrectCount} / ${choiceQuestionCount} 問`;
+        rateTextEl.innerText = `${accuracyRate}%`;
+        subScoreEl.innerText = `定着度（◯覚えた・◎完璧）: ${rememberedCount} / ${total} 問（${retentionRate}%）`;
+        subScoreEl.style.display = "block";
       } else {
-        choiceScoreEl.style.display = "none";
+        // 一問一答のみの場合は定着率を表示
+        mainLabelEl.innerText = "今回「◯覚えた」または「◎完璧」になった割合";
+        scoreTextEl.innerText = `${rememberedCount} / ${total} 問`;
+        rateTextEl.innerText = `${retentionRate}%`;
+        subScoreEl.style.display = "none";
       }
 
-      saveHistoryRecord(currentCourseName, rememberedCount, total, rate, choiceCorrectCount, choiceQuestionCount);
+      const retryBtn = document.getElementById("retry-wrong-btn");
+      if (currentRoundWrongQuestions.length > 0) {
+        retryBtn.innerText = `今回「まだ」「あやしい」だった ${currentRoundWrongQuestions.length} 問だけ解き直す`;
+        retryBtn.style.display = "block";
+      } else {
+        retryBtn.style.display = "none";
+      }
+
+      saveHistoryRecord(currentCourseName, rememberedCount, total, retentionRate, choiceCorrectCount, choiceQuestionCount);
       showScreen("finish-screen");
     }
 
@@ -1226,16 +1243,15 @@
           const li = document.createElement("li");
           li.className = "history-item";
 
-          const rateClass = getRateClass(item.rate);
-          const barColor = getBarColor(item.rate);
+          const hasChoice = item.choiceTotal && item.choiceTotal > 0;
+          const displayRate = hasChoice ? Math.round((item.choiceCorrect / item.choiceTotal) * 100) : item.rate;
+          const displayScore = hasChoice ? `${item.choiceCorrect}/${item.choiceTotal}` : item.score;
 
-          let choiceInfoHtml = "";
-          if (item.choiceTotal && item.choiceTotal > 0) {
-            const cRate = Math.round((item.choiceCorrect / item.choiceTotal) * 100);
-            choiceInfoHtml = `<span>選択式正答: ${item.choiceCorrect}/${item.choiceTotal} (${cRate}%)</span>`;
-          } else {
-            choiceInfoHtml = `<span>一問一答形式</span>`;
-          }
+          const rateClass = getRateClass(displayRate);
+          const barColor = getBarColor(displayRate);
+
+          const mainLabel = hasChoice ? "正答率" : "定着率（一問一答）";
+          const subText = hasChoice ? `定着率(◯・◎): ${item.score}問 (${item.rate}%)` : "";
 
           li.innerHTML = `
             <div class="history-item-top">
@@ -1243,26 +1259,25 @@
                 <span style="color:#666;">${item.date}</span>
                 <span style="margin-left:6px; font-weight:bold; color:#333;">[${item.course}]</span>
               </div>
-              <span class="rate-pill ${rateClass}">${item.score}問 (${item.rate}%)</span>
+              <span class="rate-pill ${rateClass}">${displayScore}問 (${displayRate}%)</span>
             </div>
             <div class="history-item-sub">
-              <span>定着度（◯・◎）達成率</span>
-              ${choiceInfoHtml}
+              <span>${mainLabel}</span>
+              <span>${subText}</span>
             </div>
             <div class="progress-bar-bg">
-              <div class="progress-bar-fill" style="width: ${item.rate}%; background-color: ${barColor};"></div>
+              <div class="progress-bar-fill" style="width: ${displayRate}%; background-color: ${barColor};"></div>
             </div>
           `;
           historyList.appendChild(li);
         });
       } else {
-        // 日ごとの集計（出現順＝新しい日付順を維持）
+        // 日ごとの集計
         const dailyMap = new Map();
 
         history.forEach(item => {
           const dayKey = item.dayOnly || (item.date ? item.date.split(" ")[0] : "不明");
 
-          // 古い履歴データ（score: "4/5" のみ保存されている場合）にも対応
           let c = item.correct;
           let t = item.total;
           if (c === undefined || t === undefined) {
@@ -1296,17 +1311,18 @@
         });
 
         dailyMap.forEach(stat => {
-          const dailyRate = stat.total > 0 ? Math.round((stat.correct / stat.total) * 100) : 0;
-          const rateClass = getRateClass(dailyRate);
-          const barColor = getBarColor(dailyRate);
+          const hasChoice = stat.choiceTotal > 0;
+          const displayRate = hasChoice
+            ? Math.round((stat.choiceCorrect / stat.choiceTotal) * 100)
+            : (stat.total > 0 ? Math.round((stat.correct / stat.total) * 100) : 0);
+          const displayScore = hasChoice ? `${stat.choiceCorrect}/${stat.choiceTotal}` : `${stat.correct}/${stat.total}`;
 
-          let choiceInfoHtml = "";
-          if (stat.choiceTotal > 0) {
-            const dailyChoiceRate = Math.round((stat.choiceCorrect / stat.choiceTotal) * 100);
-            choiceInfoHtml = `<span>選択式正答: ${stat.choiceCorrect}/${stat.choiceTotal} (${dailyChoiceRate}%)</span>`;
-          } else {
-            choiceInfoHtml = `<span>実施回数: ${stat.sessions}回</span>`;
-          }
+          const rateClass = getRateClass(displayRate);
+          const barColor = getBarColor(displayRate);
+
+          const retentionRate = stat.total > 0 ? Math.round((stat.correct / stat.total) * 100) : 0;
+          const mainLabel = hasChoice ? "1日の合計正答率" : "1日の合計定着率";
+          const subText = hasChoice ? `定着率(◯・◎): ${stat.correct}/${stat.total}問 (${retentionRate}%)` : "";
 
           const li = document.createElement("li");
           li.className = "history-item";
@@ -1316,14 +1332,14 @@
                 <span style="font-weight:bold; font-size:1rem; color:#333;">${stat.day}</span>
                 <span style="margin-left:8px; font-size:0.8rem; color:#666;">（${stat.sessions}回実施）</span>
               </div>
-              <span class="rate-pill ${rateClass}">${stat.correct}/${stat.total}問 (${dailyRate}%)</span>
+              <span class="rate-pill ${rateClass}">${displayScore}問 (${displayRate}%)</span>
             </div>
             <div class="history-item-sub">
-              <span>1日の合計定着率</span>
-              ${choiceInfoHtml}
+              <span>${mainLabel}</span>
+              <span>${subText}</span>
             </div>
             <div class="progress-bar-bg">
-              <div class="progress-bar-fill" style="width: ${dailyRate}%; background-color: ${barColor};"></div>
+              <div class="progress-bar-fill" style="width: ${displayRate}%; background-color: ${barColor};"></div>
             </div>
           `;
           historyList.appendChild(li);
