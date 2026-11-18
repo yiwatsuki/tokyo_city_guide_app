@@ -398,23 +398,109 @@
       font-size: 1.5rem;
       font-weight: bold;
       color: #333;
-      margin-bottom: 20px;
+      margin-bottom: 12px;
+    }
+
+    .sub-score-text {
+      font-size: 0.95rem;
+      color: #555;
+      margin-bottom: 16px;
+    }
+
+    /* 履歴タブ＆リストのスタイル */
+    .history-tabs {
+      display: flex;
+      background-color: #f1f3f5;
+      border-radius: 8px;
+      padding: 4px;
+      margin-bottom: 16px;
+      gap: 4px;
+    }
+
+    .history-tab {
+      flex: 1;
+      padding: 10px 8px;
+      font-size: 0.9rem;
+      font-weight: bold;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: #666;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .history-tab.active {
+      background-color: #ffffff;
+      color: #0071e3;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.08);
     }
 
     .history-list {
       list-style: none;
       padding: 0;
       margin: 0 0 20px 0;
-      max-height: 300px;
+      max-height: 360px;
       overflow-y: auto;
     }
 
     .history-item {
       padding: 12px;
       border-bottom: 1px solid #eee;
+      font-size: 0.9rem;
+    }
+
+    .history-item-top {
       display: flex;
       justify-content: space-between;
-      font-size: 0.9rem;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .history-item-sub {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.8rem;
+      color: #666;
+    }
+
+    .rate-pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-weight: bold;
+      font-size: 0.85rem;
+    }
+
+    .rate-high {
+      background-color: #e6f4ea;
+      color: #137333;
+    }
+
+    .rate-mid {
+      background-color: #e3f2fd;
+      color: #1976d2;
+    }
+
+    .rate-low {
+      background-color: #fef3e0;
+      color: #e08300;
+    }
+
+    .progress-bar-bg {
+      width: 100%;
+      height: 6px;
+      background-color: #e9ecef;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.3s ease;
     }
 
     .count-info {
@@ -541,6 +627,7 @@
         <div>今回「◯覚えた」または「◎完璧」になった割合</div>
         <div class="score-number" id="score-text">0 / 0 問</div>
         <div class="rate-number" id="rate-text">0%</div>
+        <div class="sub-score-text" id="choice-score-text" style="display: none;"></div>
       </div>
       
       <button class="weak-btn" id="retry-wrong-btn" onclick="retryCurrentWrongQuestions()" style="display: none; width: 100%; margin-bottom: 12px;">今回「まだ」「あやしい」だった問題だけ解き直す</button>
@@ -550,6 +637,10 @@
     <!-- 4. 履歴画面 -->
     <div id="history-screen" class="screen">
       <h2>学習履歴</h2>
+      <div class="history-tabs">
+        <button class="history-tab active" id="tab-session" onclick="switchHistoryTab('session')">実施ごとの履歴</button>
+        <button class="history-tab" id="tab-daily" onclick="switchHistoryTab('daily')">日ごとの集計</button>
+      </div>
       <ul class="history-list" id="history-list"></ul>
       <button class="sub-btn" onclick="clearHistory()" style="width:100%; margin-bottom:12px; color:#c5221f;">履歴・記憶・出題記録を初期化</button>
       <button class="menu-btn" style="width:100%;" onclick="showStartScreen()">メニューに戻る</button>
@@ -569,7 +660,10 @@
     let currentRoundWrongQuestions = [];
     let currentQuestionIndex = 0;
     let rememberedCount = 0;
+    let choiceQuestionCount = 0;
+    let choiceCorrectCount = 0;
     let currentCourseName = "";
+    let currentHistoryTab = "session";
 
     function parseCSVRecords(text) {
       const records = [];
@@ -670,7 +764,6 @@
       }
 
       try {
-        // Vercelのサーバーレス関数(/api/csv)から直接取得
         const response = await fetch("/api/csv?t=" + new Date().getTime());
         if (!response.ok) {
           throw new Error("HTTP error: " + response.status);
@@ -906,6 +999,8 @@
       currentQuizSet = selected;
       currentQuestionIndex = 0;
       rememberedCount = 0;
+      choiceQuestionCount = 0;
+      choiceCorrectCount = 0;
       currentRoundWrongQuestions = [];
 
       showScreen("quiz-screen");
@@ -917,6 +1012,8 @@
       currentQuizSet = shuffleArray(currentRoundWrongQuestions);
       currentQuestionIndex = 0;
       rememberedCount = 0;
+      choiceQuestionCount = 0;
+      choiceCorrectCount = 0;
       currentRoundWrongQuestions = [];
 
       showScreen("quiz-screen");
@@ -994,6 +1091,11 @@
       const buttons = document.querySelectorAll("#choices-container .choice-btn");
       const isCorrect = selectedText === currentQuiz.answer;
 
+      choiceQuestionCount++;
+      if (isCorrect) {
+        choiceCorrectCount++;
+      }
+
       buttons.forEach(btn => {
         btn.disabled = true;
         if (btn.dataset.choice === currentQuiz.answer) {
@@ -1051,58 +1153,189 @@
       document.getElementById("score-text").innerText = `${rememberedCount} / ${total} 問`;
       document.getElementById("rate-text").innerText = `${rate}%`;
 
-      const retryBtn = document.getElementById("retry-wrong-btn");
-      if (currentRoundWrongQuestions.length > 0) {
-        retryBtn.innerText = `今回「まだ」「あやしい」だった ${currentRoundWrongQuestions.length} 問だけ解き直す`;
-        retryBtn.style.display = "block";
+      const choiceScoreEl = document.getElementById("choice-score-text");
+      if (choiceQuestionCount > 0) {
+        const choiceRate = Math.round((choiceCorrectCount / choiceQuestionCount) * 100);
+        choiceScoreEl.innerText = `（選択式の初回正答率: ${choiceCorrectCount} / ${choiceQuestionCount} 問 ・ ${choiceRate}%）`;
+        choiceScoreEl.style.display = "block";
       } else {
-        retryBtn.style.display = "none";
+        choiceScoreEl.style.display = "none";
       }
 
-      saveHistoryRecord(currentCourseName, rememberedCount, total, rate);
+      saveHistoryRecord(currentCourseName, rememberedCount, total, rate, choiceCorrectCount, choiceQuestionCount);
       showScreen("finish-screen");
     }
 
-    function saveHistoryRecord(course, correct, total, rate) {
+    function saveHistoryRecord(course, correct, total, rate, choiceCorrect, choiceTotal) {
       const now = new Date();
-      const dateStr = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const month = now.getMonth() + 1;
+      const day = now.getDate();
+      const dayOnly = `${month}/${day}`;
+      const dateStr = `${dayOnly} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
       const record = {
         date: dateStr,
+        dayOnly: dayOnly,
         course: course,
+        correct: correct,
+        total: total,
         score: `${correct}/${total}`,
-        rate: rate
+        rate: rate,
+        choiceCorrect: choiceCorrect,
+        choiceTotal: choiceTotal
       };
 
       let history = JSON.parse(localStorage.getItem(STORAGE_KEYS.HISTORY) || "[]");
       history.unshift(record);
-      if (history.length > 20) history.pop();
+      if (history.length > 200) history.pop();
 
       localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
     }
 
-    function showHistoryScreen() {
+    function getRateClass(rate) {
+      if (rate >= 80) return "rate-high";
+      if (rate >= 50) return "rate-mid";
+      return "rate-low";
+    }
+
+    function getBarColor(rate) {
+      if (rate >= 80) return "#34a853";
+      if (rate >= 50) return "#0071e3";
+      return "#ff9500";
+    }
+
+    function switchHistoryTab(tab) {
+      currentHistoryTab = tab;
+      document.getElementById("tab-session").classList.toggle("active", tab === "session");
+      document.getElementById("tab-daily").classList.toggle("active", tab === "daily");
+      renderHistoryList();
+    }
+
+    function renderHistoryList() {
       const history = JSON.parse(localStorage.getItem(STORAGE_KEYS.HISTORY) || "[]");
       const historyList = document.getElementById("history-list");
       historyList.innerHTML = "";
 
       if (history.length === 0) {
         historyList.innerHTML = '<li style="text-align:center; color:#666; padding:20px;">履歴データはありません</li>';
-      } else {
+        return;
+      }
+
+      if (currentHistoryTab === "session") {
         history.forEach(item => {
           const li = document.createElement("li");
           li.className = "history-item";
+
+          const rateClass = getRateClass(item.rate);
+          const barColor = getBarColor(item.rate);
+
+          let choiceInfoHtml = "";
+          if (item.choiceTotal && item.choiceTotal > 0) {
+            const cRate = Math.round((item.choiceCorrect / item.choiceTotal) * 100);
+            choiceInfoHtml = `<span>選択式正答: ${item.choiceCorrect}/${item.choiceTotal} (${cRate}%)</span>`;
+          } else {
+            choiceInfoHtml = `<span>一問一答形式</span>`;
+          }
+
           li.innerHTML = `
-            <div>
-              <span style="color:#666;">${item.date}</span>
-              <span style="margin-left:8px; font-weight:bold;">[${item.course}]</span>
+            <div class="history-item-top">
+              <div>
+                <span style="color:#666;">${item.date}</span>
+                <span style="margin-left:6px; font-weight:bold; color:#333;">[${item.course}]</span>
+              </div>
+              <span class="rate-pill ${rateClass}">${item.score}問 (${item.rate}%)</span>
             </div>
-            <div style="font-weight:bold; color:#333;">${item.score}問 (${item.rate}%)</div>
+            <div class="history-item-sub">
+              <span>定着度（◯・◎）達成率</span>
+              ${choiceInfoHtml}
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" style="width: ${item.rate}%; background-color: ${barColor};"></div>
+            </div>
+          `;
+          historyList.appendChild(li);
+        });
+      } else {
+        // 日ごとの集計（出現順＝新しい日付順を維持）
+        const dailyMap = new Map();
+
+        history.forEach(item => {
+          const dayKey = item.dayOnly || (item.date ? item.date.split(" ")[0] : "不明");
+
+          // 古い履歴データ（score: "4/5" のみ保存されている場合）にも対応
+          let c = item.correct;
+          let t = item.total;
+          if (c === undefined || t === undefined) {
+            if (item.score && item.score.includes("/")) {
+              const parts = item.score.split("/");
+              c = parseInt(parts[0], 10) || 0;
+              t = parseInt(parts[1], 10) || 0;
+            } else {
+              c = 0;
+              t = 0;
+            }
+          }
+
+          if (!dailyMap.has(dayKey)) {
+            dailyMap.set(dayKey, {
+              day: dayKey,
+              sessions: 0,
+              correct: 0,
+              total: 0,
+              choiceCorrect: 0,
+              choiceTotal: 0
+            });
+          }
+
+          const stat = dailyMap.get(dayKey);
+          stat.sessions += 1;
+          stat.correct += c;
+          stat.total += t;
+          stat.choiceCorrect += (item.choiceCorrect || 0);
+          stat.choiceTotal += (item.choiceTotal || 0);
+        });
+
+        dailyMap.forEach(stat => {
+          const dailyRate = stat.total > 0 ? Math.round((stat.correct / stat.total) * 100) : 0;
+          const rateClass = getRateClass(dailyRate);
+          const barColor = getBarColor(dailyRate);
+
+          let choiceInfoHtml = "";
+          if (stat.choiceTotal > 0) {
+            const dailyChoiceRate = Math.round((stat.choiceCorrect / stat.choiceTotal) * 100);
+            choiceInfoHtml = `<span>選択式正答: ${stat.choiceCorrect}/${stat.choiceTotal} (${dailyChoiceRate}%)</span>`;
+          } else {
+            choiceInfoHtml = `<span>実施回数: ${stat.sessions}回</span>`;
+          }
+
+          const li = document.createElement("li");
+          li.className = "history-item";
+          li.innerHTML = `
+            <div class="history-item-top">
+              <div>
+                <span style="font-weight:bold; font-size:1rem; color:#333;">${stat.day}</span>
+                <span style="margin-left:8px; font-size:0.8rem; color:#666;">（${stat.sessions}回実施）</span>
+              </div>
+              <span class="rate-pill ${rateClass}">${stat.correct}/${stat.total}問 (${dailyRate}%)</span>
+            </div>
+            <div class="history-item-sub">
+              <span>1日の合計定着率</span>
+              ${choiceInfoHtml}
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" style="width: ${dailyRate}%; background-color: ${barColor};"></div>
+            </div>
           `;
           historyList.appendChild(li);
         });
       }
+    }
 
+    function showHistoryScreen() {
+      currentHistoryTab = "session";
+      document.getElementById("tab-session").classList.add("active");
+      document.getElementById("tab-daily").classList.remove("active");
+      renderHistoryList();
       showScreen("history-screen");
     }
 
@@ -1112,7 +1345,7 @@
         localStorage.removeItem(STORAGE_KEYS.LEVELS);
         localStorage.removeItem(STORAGE_KEYS.COUNTS);
         localStorage.removeItem(STORAGE_KEYS.CACHE);
-        showHistoryScreen();
+        renderHistoryList();
       }
     }
 
